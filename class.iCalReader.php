@@ -355,7 +355,12 @@ class ICal
         if ($date[8] == 'Z'){
                 $conv_date = new DateTime(now, new DateTimeZone('UTC'));
         } elseif (!$tzone) {
-                $conv_date = new DateTime(now);
+                $defaultTimeZone = $this->calendarTimeZone();
+                if(!$defaultTimeZone) {
+                        $conv_date = new DateTime(now);
+                } else {
+                        $conv_date = new DateTime(now, new dateTimeZone($defaultTimeZone));
+                }
         } else {
                 $conv_date = new DateTime(now, new DateTimeZone($tzone));
         }
