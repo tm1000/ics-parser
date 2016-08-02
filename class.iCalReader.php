@@ -60,7 +60,7 @@ class ICal
         } else {
             $lines = file($filename, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
         }
-        
+
         if ($weekStart) {
             $this->default_weekStart = $weekStart;
         }
@@ -313,34 +313,55 @@ class ICal
         }
     }
 
-    /**
+   /**
      * Return Unix timestamp from iCal date time format
      *
      * @param {string} $icalDate A Date in the format YYYYMMDD[T]HHMMSS[Z] or
-     *                           YYYYMMDD[T]HHMMSS
+     *                           YYYYMMDD[T]HHMMSS or
+     *                           TZID=Timezone:YYYYMMDD[T]HHMMSS
      *
      * @return {int}
      */
-    public static function iCalDateToUnixTimestamp($icalDate)
+    public function iCalDateToUnixTimestamp($icalDate)
     {
-        $icalDate = str_replace('T', '', $icalDate);
-        $icalDate = str_replace('Z', '', $icalDate);
+        /**
+         * iCal times may be in 3 formats, ref http://www.kanzaki.com/docs/ical/dateTime.html
+         * UTC:      Has a trailing 'Z'
+         * Floating: No timezone reference specified, no trailing 'Z', use local time
+         * TZID:     Set timezone as specified
+         * Use DateTime class objects to get around limitations with mktime and gmmktime. Must have a local timezone set
+         * to process floating times.
+         */
 
-        $pattern  = '/([0-9]{4})';   // 1: YYYY
-        $pattern .= '([0-9]{2})';    // 2: MM
-        $pattern .= '([0-9]{2})';    // 3: DD
-        $pattern .= '([0-9]{0,2})';  // 4: HH
-        $pattern .= '([0-9]{0,2})';  // 5: MM
-        $pattern .= '([0-9]{0,2})/'; // 6: SS
+        $pattern  = '/\AT?Z?I?D?=?(.*):?'; // 1: TimeZone
+        $pattern .= '([0-9]{4})';          // 2: YYYY
+        $pattern .= '([0-9]{2})';          // 3: MM
+        $pattern .= '([0-9]{2})';          // 4: DD
+        $pattern .= 'T?';                  //    Time delimiter
+        $pattern .= '([0-9]{0,2})';        // 5: HH
+        $pattern .= '([0-9]{0,2})';        // 6: MM
+        $pattern .= '([0-9]{0,2})';        // 7: SS
+        $pattern .= '(Z?)/';               // 8: UTC flag
         preg_match($pattern, $icalDate, $date);
+        $tzone = str_replace(':', '', $date[1]);
 
         // Unix timestamp can't represent dates before 1970
-        if ($date[1] <= 1970) {
+        if ($date[2] <= 1970) {
             return false;
         }
         // Unix timestamps after 03:14:07 UTC 2038-01-19 might cause an overflow
         // if 32 bit integers are used.
-        $timestamp = mktime((int)$date[4], (int)$date[5], (int)$date[6], (int)$date[2], (int)$date[3], (int)$date[1]);
+
+        if ($date[8] == 'Z'){
+                $conv_date = new DateTime(now, new DateTimeZone('UTC'));
+        } elseif (!$tzone) {
+                $conv_date = new DateTime(now);
+        } else {
+                $conv_date = new DateTime(now, new DateTimeZone($tzone));
+        }
+        $conv_date->setDate((int)$date[2], (int)$date[3], (int)$date[4]);
+        $conv_date->setTime((int)$date[5], (int)$date[6], (int)$date[7]);
+        $timestamp = $conv_date->getTimestamp();
         return $timestamp;
     }
 
@@ -361,7 +382,7 @@ class ICal
         }
         $date_array=$event[$key."_array"];
         $date=$event[$key];
-    
+
         if (isset($date_array[0]['TZID']) and preg_match("/[a-z]*\/[a-z_]*/i",$date_array[0]['TZID'])) {
             $timeZone = $date_array[0]['TZID'];
         } else {
@@ -369,7 +390,7 @@ class ICal
         }
 
         $dateTime = new dateTime($event[$key]);
-    
+
         if (substr($date,-1) == 'Z') {
             $date=substr($date,0,-1);
             $tz = new dateTimeZone($defaultTimeZone);
@@ -385,13 +406,13 @@ class ICal
         if ($offset >= 0) {
             $offset = '+'.$offset;
         }
-    
+
         $time = strtotime($date." $offset seconds");
-    
+
         return date('Ymd\THis',$time);
     }
-    
-    
+
+
     /**
      * Processes recurrences
      *
@@ -501,7 +522,7 @@ class ICal
 
                             if (!$is_excluded) {
                                 $events[] = $anEvent;
-                                
+
                                 // If RRULE[COUNT] is reached : break
                                 if (isset($rrules['COUNT'])) {
                                     $count_nb ++;
@@ -518,7 +539,7 @@ class ICal
                     case 'WEEKLY':
                         // Create offset
                         $offset = "+$interval week";
-                        
+
                         // Use RRULE['WKST'] setting or a default week start (USA = SU, Europe = MO)
                         $weeks = array(
                             'SA' => array('SA', 'SU', 'MO', 'TU', 'WE', 'TH', 'FR'),
@@ -732,11 +753,11 @@ class ICal
     }
 
     /**
-     * Processes dates conversion with timezone 
+     * Processes dates conversion with timezone
      * @author Jerome Combes <jerome@planningbiblio.fr>
      *
      * Add fields DTSTART_tz and DTEND_tz to each event
-     * These fields contain dates adapted to the calendar timezone depending to the event TZID (Ymd\THis) 
+     * These fields contain dates adapted to the calendar timezone depending to the event TZID (Ymd\THis)
      * @return {array}
      */
     public function process_dates_conversion()
@@ -747,7 +768,7 @@ class ICal
         if (empty($events)) {
             return false;
         }
-    
+
         foreach ($events as $key => $anEvent) {
             $events[$key]['DTSTART_tz'] = $this->iCalDateWithTimezone($anEvent, "DTSTART");
             $events[$key]['DTEND_tz'] = $this->iCalDateWithTimezone($anEvent, "DTEND");
